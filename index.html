@@ -7,7 +7,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
-<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
 /* ═══ VARIABLES ═══ */
@@ -1406,11 +1405,14 @@ const SUPABASE_CLIENT = typeof supabase !== 'undefined' ? supabase.createClient(
 // Supabase Configuration is initialized below; Firebase removed
 
 const APP_STATE_KEY   = 'liquifiApplyState';
-const EMAILJS_SERVICE = 'service_qhkem3s';
-const EMAILJS_TEMPLATE= 'template_isz51t9';
-const EMAILJS_PUBLIC  = 'f5ua3WLUQ5wmt7F5Z';
 const ADMIN_EMAIL     = 'venkateshnaik1731@gmail.com';
 const DEMO_OTP        = '123456';
+
+// OTP Configuration
+const OTP_EXPIRY_MINS = 5;
+const OTP_MAX_ATTEMPTS = 3;
+const SMS_ENABLED = false;
+const SMS_PROVIDER = null;
 
 /* ── LEAD STATE ──────────────────────────────────────── */
 const LEAD = {
@@ -1444,40 +1446,6 @@ window.addEventListener('load', async () => {
   const sl = document.getElementById('scoreSlider');
   const tick = () => { v = Math.min(v+10,742); sl.value=v; updateGauge(v); if(v<742) requestAnimationFrame(tick); };
   setTimeout(()=>requestAnimationFrame(tick), 600);
-
-  // EmailJS
-  // EmailJS v4 init
-  if(typeof emailjs !== 'undefined'){
-    emailjs.init({ publicKey: EMAILJS_PUBLIC });
-    console.log('✅ EmailJS initialised with key:', EMAILJS_PUBLIC.slice(0,6)+'...');
-  } else {
-    console.warn('⚠️ EmailJS SDK not loaded — check CDN');
-  }
-
-  // Test helper: send a test email via EmailJS from console
-  // Usage: testEmailJS('you@domain.com')
-  window.testEmailJS = async function(toEmail){
-    if(typeof emailjs === 'undefined') return console.warn('EmailJS SDK not loaded');
-    if(!toEmail) return console.warn('Provide recipient email as argument');
-    const params = {
-      to_email: toEmail,
-      user_email: toEmail,
-      subject: 'LiquiFi Test Email',
-      message: 'This is a test email from LiquiFi via EmailJS.',
-      otp_code: '123456',
-      otp_expiry: OTP_EXPIRY_MINS
-    };
-    try{
-      const res = await emailjs.send(EMAILJS_SERVICE, EMAILJS_TEMPLATE, params, EMAILJS_PUBLIC);
-      console.log('📧 EmailJS test send result:', res);
-      showToast('✅ Test email sent to ' + toEmail, 'success');
-      return res;
-    }catch(e){
-      console.error('❌ EmailJS test send failed:', e);
-      showToast('❌ Test email failed: ' + (e?.text || e?.message || e), 'error');
-      throw e;
-    }
-  }
 
   // Supabase auth restore for email magic link verification
   await initSupabaseAuth();
@@ -1720,9 +1688,15 @@ async function initSupabaseAuth() {
   }
 
   try {
-    const { data: urlData, error: urlError } = await SUPABASE_CLIENT.auth.getSessionFromUrl();
-    if (urlError && urlError.message !== 'No session found') {
-      console.warn('⚠️ Supabase URL session error:', urlError.message);
+    let urlData = null;
+    if (typeof SUPABASE_CLIENT.auth.getSessionFromUrl === 'function') {
+      const { data: urlDataResult, error: urlError } = await SUPABASE_CLIENT.auth.getSessionFromUrl();
+      urlData = urlDataResult;
+      if (urlError && urlError.message !== 'No session found') {
+        console.warn('⚠️ Supabase URL session error:', urlError.message);
+      }
+    } else {
+      console.log('ℹ️ Supabase auth: getSessionFromUrl() not available in this SDK version');
     }
 
     const { data, error } = await SUPABASE_CLIENT.auth.getSession();
@@ -2171,30 +2145,48 @@ async function storeOTPToDatabase(email, phone, otpCode, otpType = 'email') {
 }
 
 async function sendOTPViaEmail(email, otpCode) {
-  try {
-    if (typeof emailjs === 'undefined') {
-      console.warn('⚠️ EmailJS SDK not loaded. OTP will be stored locally for testing.');
-      return true; // Still allow testing with local verification
+  const payload = {
+    email,
+    otpCode,
+    expiryMinutes: OTP_EXPIRY_MINS,
+    subject: 'Your LiquiFi OTP Code',
+    message: `Your LiquiFi OTP is: ${otpCode}\n\nThis OTP expires in ${OTP_EXPIRY_MINS} minutes. Do not share it with anyone.`
+  };
+
+  const endpoints = ['/api/send-otp', '/.netlify/functions/send-otp'];
+
+  for (const endpoint of endpoints) {
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const message = data?.error || `Email send failed with status ${res.status}`;
+        console.warn(`⚠️ ${endpoint} responded ${res.status}:`, message);
+        if (res.status === 405 || res.status === 404) {
+          continue;
+        }
+        throw new Error(message);
+      }
+
+      const data = await res.json().catch(() => ({}));
+      console.log('✅ OTP sent successfully via Netlify function:', endpoint, data);
+      return true;
+    } catch (e) {
+      console.warn(`⚠️ Attempt to send OTP via ${endpoint} failed:`, e.message || e);
+      if (endpoint === endpoints[endpoints.length - 1]) {
+        if (e.message && /405|404/.test(e.message)) {
+          throw new Error('Serverless email endpoint not available. Deploy to Netlify or run Netlify Dev.');
+        }
+        throw new Error(e.message || 'Unable to send OTP email. Please try again later.');
+      }
     }
-
-    // Send OTP email using EmailJS
-    const ejsParams = {
-      to_email: email,
-      user_email: email,
-      subject: 'Your LiquiFi Email Verification OTP',
-      message: `Your One-Time Password (OTP) is: ${otpCode}\n\nThis OTP will expire in ${OTP_EXPIRY_MINS} minutes.\n\nDo not share this OTP with anyone.`,
-      otp_code: otpCode,
-      otp_expiry: OTP_EXPIRY_MINS
-    };
-
-    await emailjs.send(EMAILJS_SERVICE, EMAILJS_TEMPLATE, ejsParams, EMAILJS_PUBLIC);
-    
-    console.log('📧 OTP sent via email to:', email);
-    return true;
-  } catch (e) {
-    console.warn('⚠️ EmailJS send warning:', e.message);
-    console.log('ℹ️ OTP is still stored and can be verified locally for testing.');
-    return true; // Don't throw - allow local verification to work
   }
 }
 
@@ -2337,25 +2329,44 @@ async function sendEmailOTP() {
   persistApplyState();
 
   const btn = document.getElementById('sendOtpBtn');
+  if (!btn) {
+    console.error('❌ sendOtpBtn not found');
+    return;
+  }
+  
   btn.disabled = true;
   btn.textContent = 'Sending...';
 
   try {
     const otpCode = generateOTP(6);
+    console.log('📧 Generated OTP:', otpCode, 'for email:', LEAD.email);
+    
     const sessionId = await storeOTPToDatabase(LEAD.email, null, otpCode, 'email');
     LEAD.otpSessionId = sessionId;
+    console.log('✅ OTP stored with session ID:', sessionId);
 
-    await sendOTPViaEmail(LEAD.email, otpCode);
+    const emailSent = await sendOTPViaEmail(LEAD.email, otpCode);
+    if (emailSent) {
+      console.log('✅ OTP email send initiated');
+    }
 
     // Show OTP inputs
-    document.getElementById('emailOtpWrap').style.display = 'block';
-    for (let i = 0; i < 6; i++) { document.getElementById('eo' + i).value = ''; }
-    document.getElementById('eo0').focus();
+    const emailOtpWrap = document.getElementById('emailOtpWrap');
+    if (emailOtpWrap) {
+      emailOtpWrap.style.display = 'block';
+      for (let i = 0; i < 6; i++) { 
+        const el = document.getElementById('eo' + i);
+        if (el) el.value = ''; 
+      }
+      const firstInput = document.getElementById('eo0');
+      if (firstInput) firstInput.focus();
+    }
 
     // Start simple expiry timer (minutes)
     let remaining = OTP_EXPIRY_MINS * 60;
     const timerEl = document.getElementById('emailOtpTimer');
     if (timerEl) timerEl.textContent = Math.ceil(remaining / 60);
+    
     const ti = setInterval(() => {
       remaining -= 1;
       if (timerEl) timerEl.textContent = Math.ceil(remaining / 60);
@@ -2367,12 +2378,13 @@ async function sendEmailOTP() {
     console.error('❌ Error sending OTP email:', e.message || e);
     showToast('❌ Failed to send OTP: ' + (e.message || 'Unknown'), 'error');
   } finally {
+    // Re-enable button after delay
     setTimeout(() => {
       if (btn) {
         btn.disabled = false;
         btn.textContent = 'Send OTP';
       }
-    }, 30000);
+    }, 3000);
   }
 }
 
@@ -2500,37 +2512,7 @@ async function submitLead() {
     if(!res.ok && res.status!==201) throw new Error('status '+res.status);
   } catch(e){ console.warn('Supabase (configure keys):', e.message); }
 
-  // 2. EmailJS — send admin notification
-  try{
-    if(typeof emailjs === 'undefined') throw new Error('EmailJS SDK not loaded');
-    const ejsParams = {
-      to_email:    ADMIN_EMAIL,
-      reply_to:    LEAD.email,
-      ref_id:      ref,
-      loan_type:   LEAD.loanType,
-      loan_amount: '₹'+fmt(LEAD.loanAmt),
-      tenure:      LEAD.tenure,
-      name:        LEAD.name,
-      phone:       LEAD.phone,
-      email:       LEAD.email,
-      city:        LEAD.city+', '+LEAD.state,
-      employment:  LEAD.empType,
-      income:      '₹'+fmt(LEAD.income)+'/mo',
-      existing_emi:LEAD.emiExisting?'₹'+fmt(LEAD.emiExisting):'None',
-      cibil:       LEAD.cibil||'Not specified',
-      pan:         LEAD.pan,
-      notes:       LEAD.notes||'—',
-      timestamp:   new Date().toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})
-    };
-    console.log('📧 Sending EmailJS with service:', EMAILJS_SERVICE, 'template:', EMAILJS_TEMPLATE);
-    const ejsResult = await emailjs.send(EMAILJS_SERVICE, EMAILJS_TEMPLATE, ejsParams);
-    console.log('✅ EmailJS sent! Status:', ejsResult.status, ejsResult.text);
-  } catch(e){
-    console.error('❌ EmailJS failed:', e.message || e);
-    // Still show success — lead is saved to Supabase regardless
-  }
-
-  // 3. Success
+  // 2. Success
   document.getElementById('refNo').textContent = 'REF: '+ref;
   document.getElementById('appStep4').classList.remove('active');
   document.getElementById('appStepper').style.display = 'none';
@@ -2815,11 +2797,30 @@ function getCurSvcStep() {
   return 1;
 }
 
-function sendSvcEmailOTP() {
+async function sendSvcEmailOTP() {
   if(!SVC.email){ showToast('Enter email in Step 2','error'); return; }
-  document.getElementById('sendSvcOtpBtn').disabled = true;
-  showToast('OTP sent to '+SVC.email+' (Demo: 123456)','success');
-  setTimeout(()=>{ const b=document.getElementById('sendSvcOtpBtn'); if(b) b.disabled=false; }, 30000);
+  const btn = document.getElementById('sendSvcOtpBtn');
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = 'Sending...';
+
+  try {
+    const otpCode = generateOTP(6);
+    const sessionId = await storeOTPToDatabase(SVC.email, null, otpCode, 'email');
+    SVC.otpSessionId = sessionId;
+    await sendOTPViaEmail(SVC.email, otpCode);
+    showToast('✅ OTP sent to '+SVC.email, 'success');
+  } catch (e) {
+    console.error('❌ Service OTP send failed:', e.message || e);
+    showToast('❌ Failed to send OTP: '+ (e.message || 'Please try again later.'), 'error');
+  } finally {
+    setTimeout(() => {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Send OTP';
+      }
+    }, 30000);
+  }
 }
 
 function seoNext(i) {
@@ -2833,21 +2834,28 @@ function seoBack(e,i) {
     document.getElementById('seo'+(i-1)).focus();
 }
 
-function checkSvcOTP() {
+async function checkSvcOTP() {
   let code='';
   for(let i=0;i<6;i++) code += document.getElementById('seo'+i).value;
-  if(code.length===6){
-    if(code===DEMO_OTP){
-      SVC.emailVerified = true;
-      document.getElementById('svcEmailOtpErr').classList.remove('show');
-      document.getElementById('svcEmailVerifiedBadge').classList.add('show');
-      document.getElementById('svcFinalSubmit').disabled = false;
-      showToast('✅ Email verified!','success');
-    } else {
-      document.getElementById('svcEmailOtpErr').classList.add('show');
-      SVC.emailVerified = false;
-      document.getElementById('svcFinalSubmit').disabled = true;
-    }
+  if(code.length!==6) return;
+  if(!SVC.otpSessionId){
+    document.getElementById('svcEmailOtpErr').textContent = 'No OTP session found. Please send OTP first.';
+    document.getElementById('svcEmailOtpErr').classList.add('show');
+    return;
+  }
+
+  try {
+    await verifyOTPServer(SVC.otpSessionId, code);
+    SVC.emailVerified = true;
+    document.getElementById('svcEmailOtpErr').classList.remove('show');
+    document.getElementById('svcEmailVerifiedBadge').classList.add('show');
+    document.getElementById('svcFinalSubmit').disabled = false;
+    showToast('✅ Email verified!','success');
+  } catch (e) {
+    document.getElementById('svcEmailOtpErr').textContent = '❌ ' + (e.message || 'Incorrect OTP');
+    document.getElementById('svcEmailOtpErr').classList.add('show');
+    SVC.emailVerified = false;
+    document.getElementById('svcFinalSubmit').disabled = true;
   }
 }
 
