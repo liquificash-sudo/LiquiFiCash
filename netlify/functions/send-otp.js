@@ -6,6 +6,7 @@ exports.handler = async (event) => {
 
     const {
       email,
+      phone,
       otpCode,
       expiryMinutes,
       subject,
@@ -14,8 +15,36 @@ exports.handler = async (event) => {
       fromName: requestFromName
     } = JSON.parse(event.body || '{}');
 
-    if (!email || !otpCode) {
-      return { statusCode: 400, body: JSON.stringify({ error: 'Missing email or otpCode' }) };
+    if (!otpCode) {
+      return { statusCode: 400, body: JSON.stringify({ error: 'Missing otpCode' }) };
+    }
+
+    if (phone) {
+      const TWOFACTOR_API_KEY = process.env.TWOFACTOR_API_KEY;
+      if (!TWOFACTOR_API_KEY) {
+        return { statusCode: 500, body: JSON.stringify({ error: '2factor API key is not configured' }) };
+      }
+
+      const digits = String(phone || '').replace(/\D/g, '');
+      if (!digits || digits.length < 10) {
+        return { statusCode: 400, body: JSON.stringify({ error: 'Invalid phone number' }) };
+      }
+
+      const phoneNumber = digits.length > 10 ? digits : digits;
+      const twoFactorUrl = `https://2factor.in/API/V1/${TWOFACTOR_API_KEY}/SMS/${phoneNumber}/${otpCode}`;
+
+      const response = await fetch(twoFactorUrl, { method: 'GET' });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data || data.Status !== 'Success') {
+        const errorText = data?.Details || data?.Message || await response.text();
+        return { statusCode: response.status || 500, body: JSON.stringify({ error: errorText || '2factor SMS failed' }) };
+      }
+
+      return { statusCode: 200, body: JSON.stringify({ success: true, service: '2factor', details: data }) };
+    }
+
+    if (!email) {
+      return { statusCode: 400, body: JSON.stringify({ error: 'Missing email or phone' }) };
     }
 
     const RESEND_API_KEY = process.env.RESEND_API_KEY;

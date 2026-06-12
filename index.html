@@ -1414,8 +1414,8 @@ const DEMO_OTP        = '123456';
 // OTP Configuration
 const OTP_EXPIRY_MINS = 5;
 const OTP_MAX_ATTEMPTS = 3;
-const SMS_ENABLED = false;
-const SMS_PROVIDER = null;
+const SMS_ENABLED = true;
+const SMS_PROVIDER = '2factor';
 
 /* ── LEAD STATE ──────────────────────────────────────── */
 const LEAD = {
@@ -2191,21 +2191,52 @@ async function sendOTPViaEmail(email, otpCode) {
 }
 
 async function sendOTPViaSMS(phone, otpCode) {
-  // SMS support is optional — configure if needed
-  if (!SMS_ENABLED || !SMS_PROVIDER) {
-    console.log('ℹ️ SMS disabled. Email OTP sent instead.');
+  if (!SMS_ENABLED || SMS_PROVIDER !== '2factor') {
+    console.log('ℹ️ SMS disabled or unsupported provider.');
     return false;
   }
 
-  try {
-    // Example: Twilio integration (requires SMS_PROVIDER config)
-    // This would call a backend endpoint or Supabase Edge Function
-    console.log('📱 SMS OTP would be sent to:', phone);
-    return true;
-  } catch (e) {
-    console.error('❌ Failed to send SMS OTP:', e.message);
-    return false;
+  const payload = {
+    phone,
+    otpCode,
+    expiryMinutes: OTP_EXPIRY_MINS,
+    message: `Your LiquiFi OTP is ${otpCode}. It expires in ${OTP_EXPIRY_MINS} minutes.`
+  };
+
+  const endpoints = ['/api/send-otp', '/.netlify/functions/send-otp'];
+
+  for (const endpoint of endpoints) {
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const message = data?.error || `SMS send failed with status ${res.status}`;
+        console.warn(`⚠️ ${endpoint} responded ${res.status}:`, message);
+        if (res.status === 405 || res.status === 404) {
+          continue;
+        }
+        throw new Error(message);
+      }
+
+      const data = await res.json().catch(() => ({}));
+      console.log('✅ SMS OTP sent successfully via:', endpoint, data);
+      return true;
+    } catch (e) {
+      console.warn(`⚠️ Attempt to send SMS via ${endpoint} failed:`, e.message || e);
+      if (endpoint === endpoints[endpoints.length - 1]) {
+        throw new Error(e.message || 'Unable to send OTP SMS. Please try again later.');
+      }
+    }
   }
+
+  return false;
 }
 
 async function verifyOTPServer(sessionId, otpCode) {
@@ -2445,13 +2476,12 @@ async function sendPhoneOTP() {
     const otpCode = generateOTP(6);
     const sessionId = await storeOTPToDatabase(null, phone, otpCode, 'phone');
     LEAD.phoneOtpSession = sessionId;
-    // Try sending SMS; if disabled, still allow local verification
     await sendOTPViaSMS(phone, otpCode);
     // Show OTP fields
     document.getElementById('fPhoneOtpWrap').style.display = 'block';
     for(let i=0;i<6;i++){ document.getElementById('po'+i).value=''; }
     document.getElementById('po0').focus();
-    showToast('✅ OTP sent to ' + phEl.value + ' (Demo OTP: 123456)', 'success');
+    showToast('✅ OTP sent to ' + phEl.value + '. Enter the 6-digit code to verify.', 'success');
   } catch(e){
     console.error('Phone OTP error:', e.message);
     showToast('❌ Failed to send OTP: '+e.message,'error');

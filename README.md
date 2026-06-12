@@ -1,15 +1,18 @@
 # LiquiFiCash
 
-This project uses Netlify for static hosting and a Netlify Function to send OTP emails via Resend.
+This project uses Netlify for static hosting and a Netlify Function to send OTPs.
 
 ## Setup
 
-1. Create a Resend account at https://resend.com
-2. Verify the sender email or domain with Resend.
+1. Create a Resend account at https://resend.com and verify the sender email or domain.
+2. Create a 2factor account at https://2factor.in for SMS OTP delivery.
 3. Set these Netlify environment variables:
    - `FROM_EMAIL` — your verified sender email
    - `FROM_NAME` (optional, defaults to `LiquiFi`)
-   - `RESEND_API_KEY` — your Resend API key
+   - `RESEND_API_KEY` — your Resend email API key
+   - `TWOFACTOR_API_KEY` — your 2factor SMS API key
+
+> Do not commit secret API keys to GitHub. Set them in Netlify dashboard or your local environment instead.
 
 ## Netlify Deployment
 
