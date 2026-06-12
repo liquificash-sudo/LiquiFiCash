@@ -1,14 +1,26 @@
 # LiquiFiCash
 
-This project uses Netlify for static hosting and a Netlify Function to send OTP emails via SendGrid.
+This project uses Netlify for static hosting and a Netlify Function to send OTP emails via Mailjet.
 
 ## Setup
 
-1. Create a SendGrid account.
-2. Verify the sender email `liquificash@gmail.com` in SendGrid.
+1. Create a Mailjet, SendGrid, or Resend account.
+2. Verify the sender email or domain with your email provider, if required.
 3. Set these Netlify environment variables:
-   - `SENDGRID_API_KEY`
    - `FROM_EMAIL`
+   - `FROM_NAME` (optional)
+
+   For Mailjet:
+   - `MAILJET_API_KEY`
+   - `MAILJET_API_SECRET`
+
+   For SendGrid:
+   - `SENDGRID_API_KEY`
+   - `MAIL_SERVICE=sendgrid` (optional when using SendGrid)
+
+   For Resend:
+   - `RESEND_API_KEY`
+   - `MAIL_SERVICE=resend` (optional when using Resend)
 
 ## Netlify Deployment
 
