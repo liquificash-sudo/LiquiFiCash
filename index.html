@@ -169,6 +169,8 @@ h2.stitle{font-size:clamp(1.6rem,4vw,2.6rem);font-weight:800;line-height:1.12;ma
 .gauge-box{background:linear-gradient(135deg,#f0f4ff,#faf5ff);border:1.5px solid var(--border2);border-radius:20px;padding:26px 20px;text-align:center;box-shadow:var(--shadow-md)}
 .gauge-svg-wrap{position:relative;width:100%;max-width:320px;height:190px;margin:0 auto 12px}
 .gauge-svg-wrap svg{width:100%;height:100%;overflow:visible}
+#gaugeFill{transition:stroke-dasharray .9s cubic-bezier(.22,.61,.36,1), stroke .9s ease}
+#gaugeGlow{transition:stroke-dasharray .9s cubic-bezier(.22,.61,.36,1), opacity .65s ease}
 .g-score-center{position:absolute;top:52%;left:50%;transform:translate(-50%,-50%);white-space:nowrap;text-align:center;pointer-events:none}
 .g-num{font-size:3rem;font-weight:800;background:var(--grad-main);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1;letter-spacing:-1px;transition:all .35s ease}
 .g-lbl{font-size:.78rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-top:4px;transition:color .35s ease}
@@ -657,12 +659,13 @@ footer{background:var(--text);color:#94a3b8;padding:52px 20px 24px}
             <filter id="gs"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
           </defs>
           <path d="M22 150 A108 108 0 0 1 238 150" fill="none" stroke="#f1f5ff" stroke-width="16" stroke-linecap="round"/>
-          <path d="M22 150 A108 108 0 0 1 238 150" fill="none" stroke="url(#sg1)" stroke-width="16" stroke-linecap="butt" stroke-dasharray="68 270" stroke-dashoffset="0"/>
-          <path d="M22 150 A108 108 0 0 1 238 150" fill="none" stroke="url(#sg2)" stroke-width="16" stroke-linecap="butt" stroke-dasharray="54 270" stroke-dashoffset="-68"/>
-          <path d="M22 150 A108 108 0 0 1 238 150" fill="none" stroke="url(#sg3)" stroke-width="16" stroke-linecap="butt" stroke-dasharray="68 270" stroke-dashoffset="-122"/>
-          <path d="M22 150 A108 108 0 0 1 238 150" fill="none" stroke="url(#sg4)" stroke-width="16" stroke-linecap="butt" stroke-dasharray="34 270" stroke-dashoffset="-190"/>
-          <path d="M22 150 A108 108 0 0 1 238 150" fill="none" stroke="url(#sg5)" stroke-width="16" stroke-linecap="butt" stroke-dasharray="46 270" stroke-dashoffset="-224"/>
-          <path id="gaugeGlow" d="M22 150 A108 108 0 0 1 238 150" fill="none" stroke="rgba(26,86,255,0.2)" stroke-width="22" stroke-linecap="round" stroke-dasharray="338" stroke-dashoffset="338" filter="url(#gs)"/>
+          <path id="gaugeFill" d="M22 150 A108 108 0 0 1 238 150" fill="none" stroke="url(#sg5)" stroke-width="16" stroke-linecap="round" stroke-dasharray="0 338" stroke-dashoffset="0"/>
+          <path d="M22 150 A108 108 0 0 1 238 150" fill="none" stroke="url(#sg1)" stroke-width="16" stroke-linecap="butt" stroke-dasharray="68 270" stroke-dashoffset="0" opacity=".2"/>
+          <path d="M22 150 A108 108 0 0 1 238 150" fill="none" stroke="url(#sg2)" stroke-width="16" stroke-linecap="butt" stroke-dasharray="54 270" stroke-dashoffset="-68" opacity=".2"/>
+          <path d="M22 150 A108 108 0 0 1 238 150" fill="none" stroke="url(#sg3)" stroke-width="16" stroke-linecap="butt" stroke-dasharray="68 270" stroke-dashoffset="-122" opacity=".2"/>
+          <path d="M22 150 A108 108 0 0 1 238 150" fill="none" stroke="url(#sg4)" stroke-width="16" stroke-linecap="butt" stroke-dasharray="34 270" stroke-dashoffset="-190" opacity=".2"/>
+          <path d="M22 150 A108 108 0 0 1 238 150" fill="none" stroke="url(#sg5)" stroke-width="16" stroke-linecap="butt" stroke-dasharray="46 270" stroke-dashoffset="-224" opacity=".2"/>
+          <path id="gaugeGlow" d="M22 150 A108 108 0 0 1 238 150" fill="none" stroke="rgba(26,86,255,0.22)" stroke-width="24" stroke-linecap="round" stroke-dasharray="0 338" stroke-dashoffset="0" filter="url(#gs)" opacity="0"/>
           <g stroke="rgba(15,23,42,0.08)" stroke-width="1.5">
             <line x1="22" y1="150" x2="12" y2="140" transform="rotate(-90 130 150)"/>
             <line x1="22" y1="150" x2="12" y2="140" transform="rotate(-67.5 130 150)"/>
@@ -1472,18 +1475,15 @@ function openModalWithProd() { openModalWith(LEAD.loanType || 'Personal Loan'); 
 
 /* ── GAUGE ───────────────────────────────────────────── */
 function updateGauge(v) {
-  v = parseInt(v);
+  v = parseInt(v, 10);
   const pct = Math.max(0, Math.min(1, (v - 300) / 600));
   const total = 338;
+  const fill = document.getElementById('gaugeFill');
   const glow = document.getElementById('gaugeGlow');
-  glow.style.strokeDasharray = `${total * pct} ${total * (1 - pct)}`;
-  glow.style.strokeDashoffset = '0';
-  glow.style.opacity = '1';
-  glow.style.transition = 'stroke-dasharray .75s ease, opacity .75s ease';
+  fill.style.strokeDasharray = `${total * pct} ${total * (1 - pct)}`;
+  glow.style.strokeDasharray = `${Math.max(18, total * pct)} ${total}`;
+  glow.style.opacity = pct > 0 ? 0.85 : 0;
   document.getElementById('gaugeNeedle').setAttribute('transform', `rotate(${-90 + pct * 180} 130 150)`);
-  const pulse = document.querySelector('.gauge-svg-wrap');
-  pulse?.classList.add('active');
-  setTimeout(() => pulse?.classList.remove('active'), 650);
   document.getElementById('gNum').textContent = v;
   document.getElementById('scoreLbl').innerHTML = `Your Score: <strong>${v}</strong>`;
   const ranges = [
